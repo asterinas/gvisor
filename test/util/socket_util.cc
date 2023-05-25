@@ -937,11 +937,43 @@ struct udp_pseudo_hdr {
   uint16_t udplen;
 };
 
+static_assert(sizeof(udp_pseudo_hdr) == 12);
+
 uint16_t UDPChecksum(struct iphdr iphdr, struct udphdr udphdr,
                      const char* payload, ssize_t payload_len) {
   struct udp_pseudo_hdr phdr = {};
   phdr.srcip = iphdr.saddr;
   phdr.destip = iphdr.daddr;
+  phdr.zero = 0;
+  phdr.protocol = IPPROTO_UDP;
+  phdr.udplen = udphdr.len;
+
+  ssize_t buf_size = sizeof(phdr) + sizeof(udphdr) + payload_len;
+  char* buf = static_cast<char*>(malloc(buf_size));
+  memcpy(buf, &phdr, sizeof(phdr));
+  memcpy(buf + sizeof(phdr), &udphdr, sizeof(udphdr));
+  memcpy(buf + sizeof(phdr) + sizeof(udphdr), payload, payload_len);
+
+  uint16_t csum = Checksum(reinterpret_cast<uint16_t*>(buf), buf_size);
+  free(buf);
+  return csum;
+}
+
+// IPv6 pseudo-header for UDP checksum calculation.
+struct udpv6_pseudo_hdr {
+  in6_addr srcip;
+  in6_addr destip;
+  char zero;
+  char protocol;
+  uint16_t udplen;
+};
+static_assert(sizeof(udpv6_pseudo_hdr) == 36);
+
+uint16_t UDPChecksum(struct ip6_hdr iphdr, struct udphdr udphdr,
+                     const char* payload, ssize_t payload_len) {
+  struct udpv6_pseudo_hdr phdr = {};
+  phdr.srcip = iphdr.ip6_src;
+  phdr.destip = iphdr.ip6_dst;
   phdr.zero = 0;
   phdr.protocol = IPPROTO_UDP;
   phdr.udplen = udphdr.len;

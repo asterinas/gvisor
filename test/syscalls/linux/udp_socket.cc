@@ -14,8 +14,13 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <net/ethernet.h>
 #include <netinet/icmp6.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/udp.h>
+#include <netpacket/packet.h>
 
 #include <ctime>
 #include <utility>
@@ -42,6 +47,7 @@
 #include "absl/time/time.h"
 #include "test/syscalls/linux/ip_socket_test_util.h"
 #include "test/syscalls/linux/unix_domain_socket_test_util.h"
+#include "test/util/capability_util.h"
 #include "test/util/file_descriptor.h"
 #include "test/util/posix_error.h"
 #include "test/util/socket_util.h"
@@ -2023,6 +2029,67 @@ TEST_P(UdpSocketTest, ConnectToZeroPortConnected) {
               SyscallSucceeds());
   ASSERT_THAT(getpeername(sock_.get(), AsSockAddr(&peername), &peerlen),
               SyscallFailsWithErrno(ENOTCONN));
+}
+
+TEST_P(UdpSocketTest, ReceiveWithZeroSourcePort) {
+  // UDP sockets can't bind to port 0, so send a UDP packet via a raw IP
+  // socket instead. If those aren't available, skip the test.
+  if (!ASSERT_NO_ERRNO_AND_VALUE(HaveRawIPSocketCapability())) {
+    GTEST_SKIP();
+  }
+
+  ASSERT_NO_ERRNO(BindLoopback());
+  constexpr absl::string_view kMessage = "hi";
+
+  // Set up the UDP body.
+  struct udphdr udphdr = {
+      .source = 0,
+      .dest = *Port(&bind_addr_storage_),
+      .len = htons(sizeof(udphdr) + kMessage.size()),
+      .check = 0,
+  };
+
+  if (GetParam() == AF_INET) {
+    udphdr.check = UDPChecksum(
+        iphdr{
+            .saddr = htonl(INADDR_LOOPBACK),
+            .daddr = htonl(INADDR_LOOPBACK),
+        },
+        udphdr, kMessage.data(), kMessage.size());
+  } else {
+    udphdr.check = UDPChecksum(
+        ip6_hdr{
+            .ip6_src = in6addr_loopback,
+            .ip6_dst = in6addr_loopback,
+        },
+        udphdr, kMessage.data(), kMessage.size());
+  }
+  // Copy the header and the payload into our packet buffer.
+  char send_buf[sizeof(udphdr) + kMessage.size()];
+  memcpy(send_buf, &udphdr, sizeof(udphdr));
+  memcpy(send_buf + sizeof(udphdr), kMessage.data(), kMessage.size());
+
+  {
+    // Send the packet out a raw socket.
+    struct sockaddr_storage raw_socket_addr = InetLoopbackAddr();
+    FileDescriptor raw_socket =
+        ASSERT_NO_ERRNO_AND_VALUE(Socket(GetParam(), SOCK_RAW, IPPROTO_UDP));
+    ASSERT_THAT(sendto(raw_socket.get(), send_buf, sizeof(send_buf), 0,
+                       reinterpret_cast<struct sockaddr*>(&raw_socket_addr),
+                       sizeof(raw_socket_addr)),
+                SyscallSucceedsWithValue(sizeof(send_buf)));
+  }
+
+  // Receive and validate the data.
+  char received[kMessage.size() + 1];
+  struct sockaddr_storage src;
+  socklen_t addr2len = sizeof(src);
+  EXPECT_THAT(recvfrom(bind_.get(), received, sizeof(received), 0,
+                       AsSockAddr(&src), &addr2len),
+              SyscallSucceedsWithValue(kMessage.size()));
+  ASSERT_EQ(src.ss_family, GetParam());
+  ASSERT_EQ(*Port(&src), 0);
+  ASSERT_EQ(absl::string_view(received, kMessage.size()), kMessage);
 }
 
 INSTANTIATE_TEST_SUITE_P(AllInetTests, UdpSocketTest,

@@ -4052,6 +4052,7 @@ cc_binary(
     deps = [
         ":ip_socket_test_util",
         ":unix_domain_socket_test_util",
+        "//test/util:capability_util",
         "//test/util:socket_util",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings:str_format",

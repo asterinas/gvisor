@@ -17,6 +17,7 @@
 
 #include <errno.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/udp.h>
 #include <sys/socket.h>
@@ -544,6 +545,10 @@ uint16_t IPChecksum(struct iphdr ip);
 
 // Compute the internet checksum of a UDP header.
 uint16_t UDPChecksum(struct iphdr iphdr, struct udphdr udphdr,
+                     const char* payload, ssize_t payload_len);
+
+// Compute the internet checksum of a UDPv6 header.
+uint16_t UDPChecksum(struct ip6_hdr iphdr, struct udphdr udphdr,
                      const char* payload, ssize_t payload_len);
 
 // Compute the internet checksum of an ICMP header.
