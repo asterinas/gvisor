@@ -23,6 +23,12 @@ namespace gvisor {
 namespace testing {
 
 std::string RunfilePath(std::string path) {
+  // Mofidy the path for Asterinas
+  static const std::string prefix = "test/syscalls/linux/";
+  if (path.substr(0, prefix.length()) == prefix) {
+    return path.substr(prefix.length());
+  }
+
   static const bazel::tools::cpp::runfiles::Runfiles* const runfiles = [] {
     std::string error;
     auto* runfiles =
